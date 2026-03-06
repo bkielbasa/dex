@@ -1,6 +1,7 @@
 package querybar
 
 import (
+	"github.com/bklimczak/dex/internal/ui/completer"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -11,11 +12,12 @@ type ExecuteQueryMsg struct {
 }
 
 type Model struct {
-	input   textinput.Model
-	focused bool
-	width   int
-	history []string
-	histIdx int
+	input     textinput.Model
+	completer completer.Model
+	focused   bool
+	width     int
+	history   []string
+	histIdx   int
 }
 
 func New() Model {
@@ -24,8 +26,9 @@ func New() Model {
 	ti.Prompt = ": "
 	ti.CharLimit = 1000
 	return Model{
-		input:   ti,
-		histIdx: -1,
+		input:     ti,
+		completer: completer.New(),
+		histIdx:   -1,
 	}
 }
 
@@ -40,11 +43,16 @@ func (m *Model) SetFocused(f bool) {
 		m.input.Focus()
 	} else {
 		m.input.Blur()
+		m.completer.Reset()
 	}
 }
 
 func (m *Model) Focused() bool {
 	return m.focused
+}
+
+func (m *Model) Completer() *completer.Model {
+	return &m.completer
 }
 
 func (m *Model) AddToHistory(q string) {
@@ -71,6 +79,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
+			m.completer.Reset()
 			query := m.input.Value()
 			if query != "" {
 				m.AddToHistory(query)
@@ -80,14 +89,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return ExecuteQueryMsg{Query: query}
 				}
 			}
-		case "ctrl+p":
-			if len(m.history) > 0 && m.histIdx > 0 {
-				m.histIdx--
-				m.input.SetValue(m.history[m.histIdx])
-				m.input.CursorEnd()
-			}
-			return m, nil
 		case "ctrl+n":
+			// If completer is active, accept completion
+			if m.completer.Active() {
+				if full, ok := m.completer.Next(); ok {
+					// Replace current word with completion
+					val := m.input.Value()
+					pos := m.input.Position()
+					prefix := extractWordBackward(val, pos)
+					before := val[:pos-len(prefix)]
+					after := val[pos:]
+					m.input.SetValue(before + full + after)
+					m.input.SetCursor(len(before) + len(full))
+					m.completer.Reset()
+				}
+				return m, nil
+			}
+			// Otherwise cycle history
 			if m.histIdx < len(m.history)-1 {
 				m.histIdx++
 				m.input.SetValue(m.history[m.histIdx])
@@ -97,19 +115,72 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.input.SetValue("")
 			}
 			return m, nil
+		case "ctrl+p":
+			m.completer.Reset()
+			if len(m.history) > 0 && m.histIdx > 0 {
+				m.histIdx--
+				m.input.SetValue(m.history[m.histIdx])
+				m.input.CursorEnd()
+			}
+			return m, nil
 		case "esc":
+			if m.completer.Active() {
+				m.completer.Reset()
+				return m, nil
+			}
 			m.input.SetValue("")
 			return m, nil
+		case "tab":
+			// Tab also accepts completion
+			if m.completer.Active() {
+				if full, ok := m.completer.Next(); ok {
+					val := m.input.Value()
+					pos := m.input.Position()
+					prefix := extractWordBackward(val, pos)
+					before := val[:pos-len(prefix)]
+					after := val[pos:]
+					m.input.SetValue(before + full + after)
+					m.input.SetCursor(len(before) + len(full))
+					m.completer.Reset()
+				}
+				return m, nil
+			}
 		}
 	}
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+
+	// Update completer after each keystroke
+	m.completer.Update(m.input.Value(), m.input.Position())
+
 	return m, cmd
 }
 
 func (m Model) View() string {
 	style := lipgloss.NewStyle().
 		Padding(0, 1)
-	return style.Render(m.input.View())
+	view := style.Render(m.input.View())
+
+	if m.completer.Active() {
+		view += "\n" + m.completer.View()
+	}
+
+	return view
+}
+
+func extractWordBackward(text string, pos int) string {
+	if pos <= 0 || pos > len(text) {
+		return ""
+	}
+	start := pos
+	for start > 0 {
+		r := text[start-1]
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			start--
+		} else {
+			break
+		}
+	}
+	return text[start:pos]
 }

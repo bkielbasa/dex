@@ -63,6 +63,12 @@ type testConnResultMsg struct {
 	err error
 }
 
+type columnsLoadedMsg struct {
+	connName string
+	table    string
+	columns  []string
+}
+
 type Model struct {
 	sidebar  sidebar.Model
 	results  results.Model
@@ -221,7 +227,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.sidebar.UpdateTables(msg.connName, msg.tables)
+		// Update completer with table names
+		m.querybar.Completer().SetTables(msg.tables)
+		// Load columns for each table in background
+		var cmds []tea.Cmd
+		for _, table := range msg.tables {
+			table := table
+			connName := msg.connName
+			cmds = append(cmds, func() tea.Cmd {
+				return func() tea.Msg {
+					engine := m.registry.Get(connName)
+					if engine == nil {
+						return nil
+					}
+					s, err := engine.Schema(table)
+					if err != nil {
+						return nil
+					}
+					var cols []string
+					for _, c := range s.Columns {
+						cols = append(cols, c.Name)
+					}
+					return columnsLoadedMsg{connName: connName, table: table, columns: cols}
+				}
+			}())
+		}
 		m.status = fmt.Sprintf("Loaded %d tables from %s", len(msg.tables), msg.connName)
+		return m, tea.Batch(cmds...)
+
+	case columnsLoadedMsg:
+		m.querybar.Completer().SetColumns(msg.table, msg.columns)
 		return m, nil
 
 	case queryResultMsg:
@@ -343,6 +378,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editorModal = editor.New()
 				m.editorModal.SetSize(m.width, m.height)
 				m.editorModal.SetHistory(m.queryHistory)
+				// Copy completions to editor
+				m.editorModal.Completer().CopyFrom(m.querybar.Completer())
 				m.modal = modalEditor
 				return m, m.editorModal.Init()
 			case key.Matches(msg, m.keys.SchemaView):

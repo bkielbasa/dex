@@ -157,16 +157,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) CompleterView() string {
+	if m.completer.Active() {
+		return m.completer.View()
+	}
+	return ""
+}
+
 func (m Model) View() string {
 	style := lipgloss.NewStyle().
 		Padding(0, 1)
-	view := style.Render(m.input.View())
-
-	if m.completer.Active() {
-		view += "\n" + m.completer.View()
-	}
-
-	return view
+	return style.Render(m.input.View())
 }
 
 func extractWordBackward(text string, pos int) string {

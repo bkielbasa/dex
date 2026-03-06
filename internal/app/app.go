@@ -3,6 +3,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/bklimczak/dex/internal/config"
 	"github.com/bklimczak/dex/internal/db"
@@ -543,6 +544,25 @@ func (m Model) View() string {
 
 	base := lipgloss.JoinVertical(lipgloss.Left, main, status)
 
+	// Overlay completer popup above query bar
+	if cv := m.querybar.CompleterView(); cv != "" {
+		sidebarWidth := m.width/4 + 3
+		if sidebarWidth < 23 {
+			sidebarWidth = 23
+		}
+		if sidebarWidth > 43 {
+			sidebarWidth = 43
+		}
+		// Position: bottom-left of results area, just above query bar
+		cvHeight := lipgloss.Height(cv)
+		// Place at bottom of screen minus query bar minus status minus completer height
+		y := m.height - 3 - cvHeight - 1
+		if y < 0 {
+			y = 0
+		}
+		base = overlayAt(base, cv, sidebarWidth, y)
+	}
+
 	// Overlay modals
 	switch m.modal {
 	case modalConnForm:
@@ -557,4 +577,39 @@ func (m Model) View() string {
 	}
 
 	return base
+}
+
+// overlayAt places fg on top of bg at the given x,y position.
+func overlayAt(bg, fg string, x, y int) string {
+	bgLines := strings.Split(bg, "\n")
+	fgLines := strings.Split(fg, "\n")
+
+	for i, fgLine := range fgLines {
+		bgIdx := y + i
+		if bgIdx < 0 || bgIdx >= len(bgLines) {
+			continue
+		}
+		bgLine := bgLines[bgIdx]
+		bgRunes := []rune(bgLine)
+		fgRunes := []rune(fgLine)
+
+		// Build new line: bg prefix + fg content + bg suffix
+		var result []rune
+		if x <= len(bgRunes) {
+			result = append(result, bgRunes[:x]...)
+		} else {
+			result = append(result, bgRunes...)
+			for len(result) < x {
+				result = append(result, ' ')
+			}
+		}
+		result = append(result, fgRunes...)
+		endX := x + len(fgRunes)
+		if endX < len(bgRunes) {
+			result = append(result, bgRunes[endX:]...)
+		}
+		bgLines[bgIdx] = string(result)
+	}
+
+	return strings.Join(bgLines, "\n")
 }

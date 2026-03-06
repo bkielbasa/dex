@@ -197,6 +197,8 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "conn", "connections":
 		return m.openConnPicker()
+	case "reload":
+		return m.reloadConfig()
 	default:
 		// Treat as SQL query
 		if cmd != "" {
@@ -208,6 +210,32 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) reloadConfig() (tea.Model, tea.Cmd) {
+	cfg, err := config.Load(m.cfgPath)
+	if err != nil {
+		m.status = fmt.Sprintf("Reload failed: %v", err)
+		return m, nil
+	}
+	m.cfg = cfg
+	// Connect any new connections not already in the registry
+	existing := make(map[string]bool)
+	for _, name := range m.registry.Names() {
+		existing[name] = true
+	}
+	var cmds []tea.Cmd
+	for _, conn := range cfg.Connections {
+		if !existing[conn.Name] {
+			cmds = append(cmds, m.connectCmd(conn))
+		}
+	}
+	if len(cmds) > 0 {
+		m.status = fmt.Sprintf("Reloaded config, connecting %d new connection(s)...", len(cmds))
+	} else {
+		m.status = "Config reloaded, no new connections"
+	}
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) openConnPicker() (tea.Model, tea.Cmd) {

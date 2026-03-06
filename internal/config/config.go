@@ -19,6 +19,7 @@ type Connection struct {
 }
 
 type Config struct {
+	Default     string       `yaml:"default,omitempty"`
 	Connections []Connection `yaml:"connections"`
 }
 

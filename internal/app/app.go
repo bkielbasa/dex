@@ -347,6 +347,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				engine.Connect(cfg)
 				m.registry.Add(conn.Name, engine, cfg)
+				if m.cfg.Default != "" && conn.Name == m.cfg.Default {
+					m.registry.SetActive(conn.Name)
+				}
 				break
 			}
 		}

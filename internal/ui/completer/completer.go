@@ -1,6 +1,7 @@
 package completer
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -78,9 +79,6 @@ func (m *Model) Update(text string, cursorPos int) bool {
 		if strings.HasPrefix(strings.ToLower(item), lower) && strings.ToLower(item) != lower {
 			m.matches = append(m.matches, item)
 		}
-		if len(m.matches) >= 8 {
-			break
-		}
 	}
 
 	m.active = len(m.matches) > 0
@@ -124,13 +122,25 @@ func (m *Model) Reset() {
 	m.selected = 0
 }
 
+const maxVisible = 10
+
 func (m Model) View() string {
 	if !m.active || len(m.matches) == 0 {
 		return ""
 	}
 
+	// Scrollable window around selected item
+	start := 0
+	if m.selected >= maxVisible {
+		start = m.selected - maxVisible + 1
+	}
+	end := start + maxVisible
+	if end > len(m.matches) {
+		end = len(m.matches)
+	}
+
 	var lines []string
-	for i, match := range m.matches {
+	for i := start; i < end; i++ {
 		style := lipgloss.NewStyle().
 			Padding(0, 1).
 			Background(lipgloss.Color("237")).
@@ -141,14 +151,19 @@ func (m Model) View() string {
 				Foreground(lipgloss.Color("230")).
 				Bold(true)
 		}
-		lines = append(lines, style.Render(match))
+		lines = append(lines, style.Render(m.matches[i]))
 	}
+
+	header := fmt.Sprintf(" %d/%d ", m.selected+1, len(m.matches))
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Italic(true)
 
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240"))
 
-	return border.Render(strings.Join(lines, "\n"))
+	return border.Render(headerStyle.Render(header) + "\n" + strings.Join(lines, "\n"))
 }
 
 func extractWord(text string, pos int) string {

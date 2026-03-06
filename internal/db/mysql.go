@@ -3,10 +3,17 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"io"
+	"log"
 	"strings"
 
-	_ "github.com/go-sql-driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
+
+func init() {
+	// Suppress mysql driver's stderr logging which breaks the TUI
+	_ = mysqldriver.SetLogger(log.New(io.Discard, "", 0))
+}
 
 type MySQL struct {
 	db       *sql.DB

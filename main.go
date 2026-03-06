@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 
 	"github.com/bklimczak/dex/internal/app"
@@ -10,6 +12,8 @@ import (
 )
 
 func main() {
+	// Suppress any stray log output that would break the TUI
+	log.SetOutput(io.Discard)
 	cfgPath := config.DefaultPath()
 	cfg, err := config.Load(cfgPath)
 	if err != nil {

@@ -74,18 +74,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+n":
 			if m.completer.Active() {
-				if full, ok := m.completer.Next(); ok {
-					val := m.textarea.Value()
-					line, col := m.textarea.Line(), m.textarea.LineInfo().ColumnOffset
-					// Find position in full text
-					pos := findPos(val, line, col)
-					prefix := extractWordBackward(val, pos)
-					before := val[:pos-len(prefix)]
-					after := val[pos:]
-					newVal := before + full + after
-					m.textarea.SetValue(newVal)
-					m.completer.Reset()
-				}
+				m.completer.Next()
 				return m, nil
 			}
 			// History navigation
@@ -98,7 +87,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+p":
-			m.completer.Reset()
+			if m.completer.Active() {
+				m.completer.Prev()
+				return m, nil
+			}
 			if len(m.history) > 0 && m.histIdx > 0 {
 				m.histIdx--
 				m.textarea.SetValue(m.history[m.histIdx])
@@ -106,7 +98,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		case "tab":
 			if m.completer.Active() {
-				if full, ok := m.completer.Next(); ok {
+				if full, ok := m.completer.Accept(); ok {
 					val := m.textarea.Value()
 					line, col := m.textarea.Line(), m.textarea.LineInfo().ColumnOffset
 					pos := findPos(val, line, col)

@@ -90,23 +90,28 @@ func (m *Model) Update(text string, cursorPos int) bool {
 	return m.active
 }
 
-// Next cycles to the next match. Returns the completion text to insert.
-func (m *Model) Next() (completion string, ok bool) {
+// Next moves selection to the next match.
+func (m *Model) Next() {
 	if !m.active || len(m.matches) == 0 {
-		return "", false
+		return
 	}
-	result := m.matches[m.selected]
 	m.selected = (m.selected + 1) % len(m.matches)
-	return result, true
 }
 
-// Completion returns the suffix to append (the part after the prefix).
-func (m *Model) CompletionSuffix() (string, bool) {
+// Prev moves selection to the previous match.
+func (m *Model) Prev() {
+	if !m.active || len(m.matches) == 0 {
+		return
+	}
+	m.selected = (m.selected - 1 + len(m.matches)) % len(m.matches)
+}
+
+// Accept returns the currently selected completion.
+func (m *Model) Accept() (completion string, ok bool) {
 	if !m.active || len(m.matches) == 0 {
 		return "", false
 	}
-	match := m.matches[m.selected]
-	return match[len(m.prefix):], true
+	return m.matches[m.selected], true
 }
 
 func (m *Model) Active() bool {

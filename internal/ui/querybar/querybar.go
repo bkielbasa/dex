@@ -90,22 +90,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case "ctrl+n":
-			// If completer is active, accept completion
 			if m.completer.Active() {
-				if full, ok := m.completer.Next(); ok {
-					// Replace current word with completion
-					val := m.input.Value()
-					pos := m.input.Position()
-					prefix := extractWordBackward(val, pos)
-					before := val[:pos-len(prefix)]
-					after := val[pos:]
-					m.input.SetValue(before + full + after)
-					m.input.SetCursor(len(before) + len(full))
-					m.completer.Reset()
-				}
+				m.completer.Next()
 				return m, nil
 			}
-			// Otherwise cycle history
+		case "ctrl+p":
+			if m.completer.Active() {
+				m.completer.Prev()
+				return m, nil
+			}
+		case "up":
+			m.completer.Reset()
+			if len(m.history) > 0 && m.histIdx > 0 {
+				m.histIdx--
+				m.input.SetValue(m.history[m.histIdx])
+				m.input.CursorEnd()
+			}
+			return m, nil
+		case "down":
+			m.completer.Reset()
 			if m.histIdx < len(m.history)-1 {
 				m.histIdx++
 				m.input.SetValue(m.history[m.histIdx])
@@ -113,14 +116,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			} else {
 				m.histIdx = len(m.history)
 				m.input.SetValue("")
-			}
-			return m, nil
-		case "ctrl+p":
-			m.completer.Reset()
-			if len(m.history) > 0 && m.histIdx > 0 {
-				m.histIdx--
-				m.input.SetValue(m.history[m.histIdx])
-				m.input.CursorEnd()
 			}
 			return m, nil
 		case "esc":
@@ -131,9 +126,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.input.SetValue("")
 			return m, nil
 		case "tab":
-			// Tab also accepts completion
 			if m.completer.Active() {
-				if full, ok := m.completer.Next(); ok {
+				if full, ok := m.completer.Accept(); ok {
 					val := m.input.Value()
 					pos := m.input.Position()
 					prefix := extractWordBackward(val, pos)

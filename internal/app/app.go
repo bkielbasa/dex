@@ -83,6 +83,7 @@ type Model struct {
 	editorModal  editor.Model
 	schemaModal  schema.Model
 	queryHistory []string
+	historyPath  string
 
 	focus  pane
 	modal  modal
@@ -96,15 +97,26 @@ func New(cfg *config.Config, cfgPath string) Model {
 	sb := sidebar.New()
 	sb.SetFocused(true)
 
+	histPath := config.HistoryPath()
+	history := config.LoadHistory(histPath)
+
+	qb := querybar.New()
+	// Pre-load history into querybar
+	for _, q := range history {
+		qb.AddToHistory(q)
+	}
+
 	return Model{
-		sidebar:  sb,
-		results:  results.New(),
-		querybar: querybar.New(),
-		registry: db.NewRegistry(),
-		cfg:      cfg,
-		cfgPath:  cfgPath,
-		focus:    paneSidebar,
-		keys:     keymap.Default,
+		sidebar:      sb,
+		results:      results.New(),
+		querybar:     qb,
+		registry:     db.NewRegistry(),
+		cfg:          cfg,
+		cfgPath:      cfgPath,
+		queryHistory: history,
+		historyPath:  histPath,
+		focus:        paneSidebar,
+		keys:         keymap.Default,
 	}
 }
 
@@ -283,6 +295,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case querybar.ExecuteQueryMsg:
 		m.status = "Executing query..."
 		m.queryHistory = append(m.queryHistory, msg.Query)
+		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)
 
 	case connform.SaveConnectionMsg:
@@ -329,6 +342,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = modalNone
 		m.status = "Executing query..."
 		m.queryHistory = append(m.queryHistory, msg.Query)
+		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)
 
 	case editor.CloseMsg:

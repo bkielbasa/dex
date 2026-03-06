@@ -314,7 +314,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		// Global keys (when no modal is open and query bar is not focused)
-		if m.modal == modalNone && m.focus != paneQueryBar {
+		if m.modal == modalNone && m.focus != paneQueryBar && !m.sidebar.Filtering() {
 			switch {
 			case key.Matches(msg, m.keys.Quit):
 				m.registry.CloseAll()
@@ -350,6 +350,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if _, table, ok := m.sidebar.SelectedTable(); ok {
 						m.status = fmt.Sprintf("Loading schema for %s...", table)
 						return m, m.loadSchemaCmd(table)
+					}
+				}
+			case key.Matches(msg, m.keys.Describe):
+				if m.focus == paneSidebar {
+					if _, table, ok := m.sidebar.SelectedTable(); ok {
+						m.status = fmt.Sprintf("Describing %s...", table)
+						query := fmt.Sprintf("SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = '%s' ORDER BY ordinal_position", table)
+						return m, m.executeQueryCmd(query)
 					}
 				}
 			}

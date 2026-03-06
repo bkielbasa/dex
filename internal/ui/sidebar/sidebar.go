@@ -7,6 +7,7 @@ import (
 
 	"github.com/bklimczak/dex/internal/ui/styles"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -29,13 +30,15 @@ type Node struct {
 }
 
 type Model struct {
-	nodes    []Node
-	cursor   int
-	focused  bool
-	width    int
-	height   int
-	filter   string
-	filtered []flatNode
+	nodes      []Node
+	cursor     int
+	focused    bool
+	width      int
+	height     int
+	filter     string
+	filtered   []flatNode
+	filtering  bool
+	filterInput textinput.Model
 }
 
 type flatNode struct {
@@ -48,7 +51,12 @@ type flatNode struct {
 }
 
 func New() Model {
-	return Model{}
+	ti := textinput.New()
+	ti.Placeholder = "filter tables..."
+	ti.CharLimit = 64
+	return Model{
+		filterInput: ti,
+	}
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -73,6 +81,10 @@ func (m *Model) SetFocused(f bool) {
 
 func (m *Model) Focused() bool {
 	return m.focused
+}
+
+func (m *Model) Filtering() bool {
+	return m.filtering
 }
 
 func (m *Model) SetConnections(names []string, tables map[string][]string) {
@@ -151,7 +163,36 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if !m.focused {
 			return m, nil
 		}
+
+		// Filter mode: delegate to text input
+		if m.filtering {
+			switch msg.String() {
+			case "esc":
+				m.filtering = false
+				m.filterInput.Blur()
+				m.filter = ""
+				m.filterInput.SetValue("")
+				m.rebuildFlat()
+				return m, nil
+			case "enter":
+				m.filtering = false
+				m.filterInput.Blur()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.filterInput, cmd = m.filterInput.Update(msg)
+				m.filter = m.filterInput.Value()
+				m.rebuildFlat()
+				return m, cmd
+			}
+		}
+
 		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
+			m.filtering = true
+			m.filterInput.SetValue(m.filter)
+			m.filterInput.Focus()
+			return m, textinput.Blink
 		case key.Matches(msg, key.NewBinding(key.WithKeys("j", "down"))):
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
@@ -187,12 +228,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	if len(m.filtered) == 0 {
+	if len(m.filtered) == 0 && !m.filtering {
 		return styles.NormalItem.Render("No connections.\nPress Ctrl+n to add one.")
 	}
 
 	var b strings.Builder
+
+	if m.filtering || m.filter != "" {
+		b.WriteString(m.filterInput.View())
+		b.WriteString("\n")
+	}
+
 	visibleHeight := m.height - 2
+	if m.filtering || m.filter != "" {
+		visibleHeight -= 1
+	}
 	if visibleHeight < 1 {
 		visibleHeight = 10
 	}

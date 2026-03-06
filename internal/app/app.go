@@ -3,6 +3,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/bklimczak/dex/internal/config"
 	"github.com/bklimczak/dex/internal/db"
@@ -11,6 +12,7 @@ import (
 	"github.com/bklimczak/dex/internal/ui/connform"
 	"github.com/bklimczak/dex/internal/ui/connpicker"
 	"github.com/bklimczak/dex/internal/ui/editor"
+	"github.com/bklimczak/dex/internal/ui/querypicker"
 	"github.com/bklimczak/dex/internal/ui/querybar"
 	"github.com/bklimczak/dex/internal/ui/results"
 	"github.com/bklimczak/dex/internal/ui/schema"
@@ -39,6 +41,7 @@ const (
 	modalSchema
 	modalCommand
 	modalConnPicker
+	modalQueryPicker
 )
 
 // Messages
@@ -87,6 +90,10 @@ type Model struct {
 	schemaModal  schema.Model
 	cmdBar       cmdbar.Model
 	connPicker   connpicker.Model
+	queryPicker  querypicker.Model
+	savedQueries *config.SavedQueries
+	queriesPath  string
+	lastQuery    string
 	queryHistory []string
 	historyPath  string
 
@@ -104,6 +111,8 @@ func New(cfg *config.Config, cfgPath string) Model {
 
 	histPath := config.HistoryPath()
 	history := config.LoadHistory(histPath)
+	qPath := config.QueriesPath()
+	sq := config.LoadQueries(qPath)
 
 	qb := querybar.New()
 	// Pre-load history into querybar
@@ -118,6 +127,8 @@ func New(cfg *config.Config, cfgPath string) Model {
 		registry:     db.NewRegistry(),
 		cfg:          cfg,
 		cfgPath:      cfgPath,
+		savedQueries: sq,
+		queriesPath:  qPath,
 		queryHistory: history,
 		historyPath:  histPath,
 		focus:        paneSidebar,
@@ -190,7 +201,14 @@ func (m Model) loadSchemaCmd(table string) tea.Cmd {
 	}
 }
 
-func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
+func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
+	cmd := input
+	var arg string
+	if idx := strings.IndexByte(input, ' '); idx != -1 {
+		cmd = input[:idx]
+		arg = strings.TrimSpace(input[idx+1:])
+	}
+
 	switch cmd {
 	case "q", "quit":
 		m.registry.CloseAll()
@@ -199,17 +217,55 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m.openConnPicker()
 	case "reload":
 		return m.reloadConfig()
+	case "save":
+		return m.saveQuery(arg)
+	case "queries", "q!":
+		return m.openQueryPicker()
 	default:
 		// Treat as SQL query
-		if cmd != "" {
-			m.queryHistory = append(m.queryHistory, cmd)
+		if input != "" {
+			m.queryHistory = append(m.queryHistory, input)
 			config.SaveHistory(m.historyPath, m.queryHistory)
-			m.querybar.AddToHistory(cmd)
+			m.querybar.AddToHistory(input)
+			m.lastQuery = input
 			m.status = "Executing query..."
-			return m, m.executeQueryCmd(cmd)
+			return m, m.executeQueryCmd(input)
 		}
 	}
 	return m, nil
+}
+
+func (m Model) saveQuery(name string) (tea.Model, tea.Cmd) {
+	if name == "" {
+		m.status = "Usage: :save <name>"
+		return m, nil
+	}
+	if m.lastQuery == "" {
+		m.status = "No query to save"
+		return m, nil
+	}
+	connName := m.registry.ActiveName()
+	if connName == "" {
+		m.status = "No active connection"
+		return m, nil
+	}
+	sq := config.SavedQuery{Name: name, Query: m.lastQuery}
+	m.savedQueries.Connections[connName] = append(m.savedQueries.Connections[connName], sq)
+	config.SaveQueries(m.queriesPath, m.savedQueries)
+	m.status = fmt.Sprintf("Saved query '%s' for %s", name, connName)
+	return m, nil
+}
+
+func (m Model) openQueryPicker() (tea.Model, tea.Cmd) {
+	connName := m.registry.ActiveName()
+	var queries []config.SavedQuery
+	if connName != "" {
+		queries = m.savedQueries.Connections[connName]
+	}
+	m.queryPicker = querypicker.New(queries)
+	m.queryPicker.SetSize(m.width, m.height)
+	m.modal = modalQueryPicker
+	return m, m.queryPicker.Init()
 }
 
 func (m Model) reloadConfig() (tea.Model, tea.Cmd) {
@@ -366,6 +422,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case querybar.ExecuteQueryMsg:
 		m.status = "Executing query..."
+		m.lastQuery = msg.Query
 		m.queryHistory = append(m.queryHistory, msg.Query)
 		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)
@@ -413,6 +470,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editor.ExecuteMsg:
 		m.modal = modalNone
 		m.status = "Executing query..."
+		m.lastQuery = msg.Query
 		m.queryHistory = append(m.queryHistory, msg.Query)
 		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)
@@ -451,6 +509,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case connpicker.CloseMsg:
 		m.modal = modalNone
+		return m, nil
+
+	case querypicker.SelectMsg:
+		m.modal = modalNone
+		m.lastQuery = msg.Query
+		m.queryHistory = append(m.queryHistory, msg.Query)
+		config.SaveHistory(m.historyPath, m.queryHistory)
+		m.querybar.AddToHistory(msg.Query)
+		m.status = "Executing saved query..."
+		return m, m.executeQueryCmd(msg.Query)
+
+	case querypicker.CloseMsg:
+		m.modal = modalNone
+		return m, nil
+
+	case querypicker.DeleteMsg:
+		connName := m.registry.ActiveName()
+		if connName != "" {
+			queries := m.savedQueries.Connections[connName]
+			for i, sq := range queries {
+				if sq.Name == msg.Name {
+					m.savedQueries.Connections[connName] = append(queries[:i], queries[i+1:]...)
+					break
+				}
+			}
+			config.SaveQueries(m.queriesPath, m.savedQueries)
+			// Reopen picker with updated list
+			return m.openQueryPicker()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -563,6 +650,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modalConnPicker:
 		var cmd tea.Cmd
 		m.connPicker, cmd = m.connPicker.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	case modalQueryPicker:
+		var cmd tea.Cmd
+		m.queryPicker, cmd = m.queryPicker.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -695,6 +789,9 @@ func (m Model) View() string {
 	case modalConnPicker:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.connPicker.View(), lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceForeground(lipgloss.Color("236")))
+	case modalQueryPicker:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			m.queryPicker.View(), lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceForeground(lipgloss.Color("236")))
 	}
 
 	return base

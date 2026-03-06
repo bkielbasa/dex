@@ -56,6 +56,17 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
+func (m *Model) SelectedTable() (connName, tableName string, ok bool) {
+	if m.cursor >= len(m.filtered) {
+		return "", "", false
+	}
+	node := m.filtered[m.cursor]
+	if node.isConn {
+		return node.connName, "", false
+	}
+	return node.connName, node.name, true
+}
+
 func (m *Model) SetFocused(f bool) {
 	m.focused = f
 }

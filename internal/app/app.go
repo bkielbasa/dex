@@ -9,6 +9,7 @@ import (
 	"github.com/bklimczak/dex/internal/keymap"
 	"github.com/bklimczak/dex/internal/ui/cmdbar"
 	"github.com/bklimczak/dex/internal/ui/connform"
+	"github.com/bklimczak/dex/internal/ui/connpicker"
 	"github.com/bklimczak/dex/internal/ui/editor"
 	"github.com/bklimczak/dex/internal/ui/querybar"
 	"github.com/bklimczak/dex/internal/ui/results"
@@ -37,6 +38,7 @@ const (
 	modalEditor
 	modalSchema
 	modalCommand
+	modalConnPicker
 )
 
 // Messages
@@ -84,6 +86,7 @@ type Model struct {
 	editorModal  editor.Model
 	schemaModal  schema.Model
 	cmdBar       cmdbar.Model
+	connPicker   connpicker.Model
 	queryHistory []string
 	historyPath  string
 
@@ -192,6 +195,8 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "q", "quit":
 		m.registry.CloseAll()
 		return m, tea.Quit
+	case "conn", "connections":
+		return m.openConnPicker()
 	default:
 		// Treat as SQL query
 		if cmd != "" {
@@ -202,6 +207,25 @@ func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
 			return m, m.executeQueryCmd(cmd)
 		}
 	}
+	return m, nil
+}
+
+func (m Model) openConnPicker() (tea.Model, tea.Cmd) {
+	activeName := m.registry.ActiveName()
+	var entries []connpicker.Entry
+	for _, name := range m.registry.Names() {
+		cfg := m.registry.GetConfig(name)
+		entries = append(entries, connpicker.Entry{
+			Name:     name,
+			Engine:   cfg.Engine,
+			Database: cfg.Database,
+			Host:     cfg.Host,
+			Active:   name == activeName,
+		})
+	}
+	m.connPicker = connpicker.New(entries)
+	m.connPicker.SetSize(m.width, m.height)
+	m.modal = modalConnPicker
 	return m, nil
 }
 
@@ -390,6 +414,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = modalNone
 		return m, nil
 
+	case connpicker.SelectMsg:
+		m.modal = modalNone
+		m.registry.SetActive(msg.Name)
+		m.status = fmt.Sprintf("Switched to %s", msg.Name)
+		m.updateSidebar()
+		return m, m.loadTablesCmd(msg.Name)
+
+	case connpicker.CloseMsg:
+		m.modal = modalNone
+		return m, nil
+
 	case tea.KeyMsg:
 		// Global keys (when no modal is open and query bar is not focused)
 		if m.modal == modalNone && m.focus != paneQueryBar && !m.sidebar.Filtering() {
@@ -493,6 +528,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modalCommand:
 		var cmd tea.Cmd
 		m.cmdBar, cmd = m.cmdBar.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	case modalConnPicker:
+		var cmd tea.Cmd
+		m.connPicker, cmd = m.connPicker.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -622,6 +664,9 @@ func (m Model) View() string {
 	case modalSchema:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.schemaModal.View(), lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceForeground(lipgloss.Color("236")))
+	case modalConnPicker:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			m.connPicker.View(), lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceForeground(lipgloss.Color("236")))
 	}
 
 	return base

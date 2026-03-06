@@ -5,10 +5,6 @@ import "github.com/charmbracelet/bubbles/key"
 
 type KeyMap struct {
 	Quit          key.Binding
-	FocusNext     key.Binding
-	FocusPrev     key.Binding
-	FocusLeft     key.Binding
-	FocusRight    key.Binding
 	Up            key.Binding
 	Down          key.Binding
 	Top           key.Binding
@@ -40,10 +36,6 @@ type KeyMap struct {
 
 var Default = KeyMap{
 	Quit:          key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
-	FocusNext:     key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
-	FocusPrev:     key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev pane")),
-	FocusLeft:     key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left")),
-	FocusRight:    key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right")),
 	Up:            key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k", "up")),
 	Down:          key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j", "down")),
 	Top:           key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),

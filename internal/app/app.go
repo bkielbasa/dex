@@ -29,7 +29,6 @@ const (
 	paneSidebar pane = iota
 	paneResults
 	paneQueryBar
-	paneCount
 )
 
 type modal int
@@ -97,12 +96,13 @@ type Model struct {
 	queryHistory []string
 	historyPath  string
 
-	focus  pane
-	modal  modal
-	width  int
-	height int
-	keys   keymap.KeyMap
-	status string
+	focus          pane
+	modal          modal
+	width          int
+	height         int
+	keys           keymap.KeyMap
+	status         string
+	awaitingWinNav bool
 }
 
 func New(cfg *config.Config, cfgPath string) Model {
@@ -320,14 +320,6 @@ func (m *Model) setFocus(p pane) {
 	m.querybar.SetFocused(p == paneQueryBar)
 }
 
-func (m *Model) cycleFocus(forward bool) {
-	if forward {
-		m.setFocus((m.focus + 1) % paneCount)
-	} else {
-		m.setFocus((m.focus - 1 + paneCount) % paneCount)
-	}
-}
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -541,6 +533,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Ctrl+W window navigation chord
+		if m.awaitingWinNav {
+			m.awaitingWinNav = false
+			switch msg.String() {
+			case "h":
+				m.setFocus(paneSidebar)
+			case "l":
+				m.setFocus(paneResults)
+			case "j":
+				m.setFocus(paneQueryBar)
+			case "k":
+				if m.focus == paneQueryBar {
+					m.setFocus(paneResults)
+				} else {
+					m.setFocus(paneSidebar)
+				}
+			}
+			return m, nil
+		}
+		if m.modal == modalNone && msg.String() == "ctrl+w" {
+			m.awaitingWinNav = true
+			return m, nil
+		}
+
 		// Global keys (when no modal is open and query bar is not focused)
 		if m.modal == modalNone && m.focus != paneQueryBar && !m.sidebar.Filtering() {
 			switch {
@@ -549,18 +565,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cmdBar.SetWidth(m.width)
 				m.modal = modalCommand
 				return m, m.cmdBar.Init()
-			case key.Matches(msg, m.keys.FocusNext):
-				m.cycleFocus(true)
-				return m, nil
-			case key.Matches(msg, m.keys.FocusPrev):
-				m.cycleFocus(false)
-				return m, nil
-			case key.Matches(msg, m.keys.FocusLeft):
-				m.setFocus(paneSidebar)
-				return m, nil
-			case key.Matches(msg, m.keys.FocusRight):
-				m.setFocus(paneResults)
-				return m, nil
 			case key.Matches(msg, m.keys.NewConn):
 				m.connForm = connform.New()
 				m.connForm.SetSize(m.width, m.height)

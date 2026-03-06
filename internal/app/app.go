@@ -7,6 +7,7 @@ import (
 	"github.com/bklimczak/dex/internal/config"
 	"github.com/bklimczak/dex/internal/db"
 	"github.com/bklimczak/dex/internal/keymap"
+	"github.com/bklimczak/dex/internal/ui/cmdbar"
 	"github.com/bklimczak/dex/internal/ui/connform"
 	"github.com/bklimczak/dex/internal/ui/editor"
 	"github.com/bklimczak/dex/internal/ui/querybar"
@@ -35,6 +36,7 @@ const (
 	modalConnForm
 	modalEditor
 	modalSchema
+	modalCommand
 )
 
 // Messages
@@ -81,6 +83,7 @@ type Model struct {
 	connForm     connform.Model
 	editorModal  editor.Model
 	schemaModal  schema.Model
+	cmdBar       cmdbar.Model
 	queryHistory []string
 	historyPath  string
 
@@ -182,6 +185,24 @@ func (m Model) loadSchemaCmd(table string) tea.Cmd {
 		s, err := engine.Schema(table)
 		return schemaLoadedMsg{schema: s, err: err}
 	}
+}
+
+func (m Model) handleCommand(cmd string) (tea.Model, tea.Cmd) {
+	switch cmd {
+	case "q", "quit":
+		m.registry.CloseAll()
+		return m, tea.Quit
+	default:
+		// Treat as SQL query
+		if cmd != "" {
+			m.queryHistory = append(m.queryHistory, cmd)
+			config.SaveHistory(m.historyPath, m.queryHistory)
+			m.querybar.AddToHistory(cmd)
+			m.status = "Executing query..."
+			return m, m.executeQueryCmd(cmd)
+		}
+	}
+	return m, nil
 }
 
 func (m *Model) setFocus(p pane) {
@@ -361,13 +382,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = modalNone
 		return m, nil
 
+	case cmdbar.ExecuteCommandMsg:
+		m.modal = modalNone
+		return m.handleCommand(msg.Command)
+
+	case cmdbar.CancelMsg:
+		m.modal = modalNone
+		return m, nil
+
 	case tea.KeyMsg:
 		// Global keys (when no modal is open and query bar is not focused)
 		if m.modal == modalNone && m.focus != paneQueryBar && !m.sidebar.Filtering() {
 			switch {
-			case key.Matches(msg, m.keys.Quit):
-				m.registry.CloseAll()
-				return m, tea.Quit
+			case key.Matches(msg, m.keys.QueryBar):
+				m.cmdBar = cmdbar.New()
+				m.cmdBar.SetWidth(m.width)
+				m.modal = modalCommand
+				return m, m.cmdBar.Init()
 			case key.Matches(msg, m.keys.FocusNext):
 				m.cycleFocus(true)
 				return m, nil
@@ -379,9 +410,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case key.Matches(msg, m.keys.FocusRight):
 				m.setFocus(paneResults)
-				return m, nil
-			case key.Matches(msg, m.keys.QueryBar):
-				m.setFocus(paneQueryBar)
 				return m, nil
 			case key.Matches(msg, m.keys.NewConn):
 				m.connForm = connform.New()
@@ -458,6 +486,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modalSchema:
 		var cmd tea.Cmd
 		m.schemaModal, cmd = m.schemaModal.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	case modalCommand:
+		var cmd tea.Cmd
+		m.cmdBar, cmd = m.cmdBar.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -567,9 +602,14 @@ func (m Model) View() string {
 
 	rightSide := lipgloss.JoinVertical(lipgloss.Left, rightParts...)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, rightSide)
-	status := styles.StatusBar.Width(m.width).Render(m.status)
+	var statusLine string
+	if m.modal == modalCommand {
+		statusLine = m.cmdBar.View()
+	} else {
+		statusLine = styles.StatusBar.Width(m.width).Render(m.status)
+	}
 
-	base := lipgloss.JoinVertical(lipgloss.Left, main, status)
+	base := lipgloss.JoinVertical(lipgloss.Left, main, statusLine)
 
 	// Overlay modals
 	switch m.modal {

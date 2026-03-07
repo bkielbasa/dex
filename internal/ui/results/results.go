@@ -17,6 +17,7 @@ type CellEditMsg struct {
 	Table    string
 	Column   string
 	NewValue string
+	IsNull   bool              // true if user wants to set NULL
 	Row      map[string]string // all column values for WHERE clause
 }
 
@@ -175,7 +176,8 @@ func (m Model) updateEditing(msg tea.Msg) (Model, tea.Cmd) {
 			newVal := m.editInput.Value()
 			oldVal := m.result.Rows[m.cursorRow][m.cursorCol]
 			m.editing = false
-			if newVal == oldVal {
+			isNull := strings.ToUpper(strings.TrimSpace(newVal)) == "NULL" || (newVal == "" && oldVal == "NULL")
+			if !isNull && newVal == oldVal {
 				return m, nil
 			}
 			// Build row map for WHERE clause
@@ -184,11 +186,16 @@ func (m Model) updateEditing(msg tea.Msg) (Model, tea.Cmd) {
 				row[col] = m.result.Rows[m.cursorRow][i]
 			}
 			// Update local data immediately
-			m.result.Rows[m.cursorRow][m.cursorCol] = newVal
+			if isNull {
+				m.result.Rows[m.cursorRow][m.cursorCol] = "NULL"
+			} else {
+				m.result.Rows[m.cursorRow][m.cursorCol] = newVal
+			}
 			editMsg := CellEditMsg{
 				Table:    m.sourceTable,
 				Column:   m.result.Columns[m.cursorCol],
 				NewValue: newVal,
+				IsNull:   isNull,
 				Row:      row,
 			}
 			return m, func() tea.Msg { return editMsg }

@@ -216,8 +216,12 @@ func (m Model) updateCellCmd(edit results.CellEditMsg) tea.Cmd {
 		var whereCols []string
 		var args []interface{}
 
-		setCols = append(setCols, fmt.Sprintf("%s = ?", edit.Column))
-		args = append(args, edit.NewValue)
+		if edit.IsNull {
+			setCols = append(setCols, fmt.Sprintf("%s = NULL", edit.Column))
+		} else {
+			setCols = append(setCols, fmt.Sprintf("%s = ?", edit.Column))
+			args = append(args, edit.NewValue)
+		}
 
 		for col, val := range edit.Row {
 			if val == "NULL" {

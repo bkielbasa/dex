@@ -75,6 +75,10 @@ type columnsLoadedMsg struct {
 	columns  []string
 }
 
+type cellUpdateResultMsg struct {
+	err error
+}
+
 type Model struct {
 	sidebar  sidebar.Model
 	results  results.Model
@@ -198,6 +202,39 @@ func (m Model) loadSchemaCmd(table string) tea.Cmd {
 		}
 		s, err := engine.Schema(table)
 		return schemaLoadedMsg{schema: s, err: err}
+	}
+}
+
+func (m Model) updateCellCmd(edit results.CellEditMsg) tea.Cmd {
+	return func() tea.Msg {
+		engine := m.registry.Active()
+		if engine == nil {
+			return cellUpdateResultMsg{err: fmt.Errorf("no active connection")}
+		}
+		// Build UPDATE query with parameterized WHERE
+		var setCols []string
+		var whereCols []string
+		var args []interface{}
+
+		setCols = append(setCols, fmt.Sprintf("%s = ?", edit.Column))
+		args = append(args, edit.NewValue)
+
+		for col, val := range edit.Row {
+			if val == "NULL" {
+				whereCols = append(whereCols, fmt.Sprintf("%s IS NULL", col))
+			} else {
+				whereCols = append(whereCols, fmt.Sprintf("%s = ?", col))
+				args = append(args, val)
+			}
+		}
+
+		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s LIMIT 1",
+			edit.Table,
+			strings.Join(setCols, ", "),
+			strings.Join(whereCols, " AND "))
+
+		_, err := engine.DB().Exec(query, args...)
+		return cellUpdateResultMsg{err: err}
 	}
 }
 
@@ -404,8 +441,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setFocus(paneResults)
 		return m, nil
 
+	case results.CellEditMsg:
+		return m, m.updateCellCmd(msg)
+
+	case cellUpdateResultMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Update failed: %v", msg.err)
+		} else {
+			m.status = "Cell updated"
+		}
+		return m, nil
+
 	case sidebar.TableSelectedMsg:
 		m.registry.SetActive(msg.Connection)
+		m.results.SetSourceTable(msg.Table)
 		query := fmt.Sprintf("SELECT * FROM %s LIMIT 100", msg.Table)
 		m.status = fmt.Sprintf("Loading %s.%s...", msg.Connection, msg.Table)
 		return m, m.executeQueryCmd(query)
@@ -418,6 +467,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case querybar.ExecuteQueryMsg:
 		m.status = "Executing query..."
 		m.lastQuery = msg.Query
+		m.results.SetSourceTable("") // arbitrary query, disable editing
 		m.queryHistory = append(m.queryHistory, msg.Query)
 		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)
@@ -466,6 +516,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = modalNone
 		m.status = "Executing query..."
 		m.lastQuery = msg.Query
+		m.results.SetSourceTable("") // arbitrary query, disable editing
 		m.queryHistory = append(m.queryHistory, msg.Query)
 		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)

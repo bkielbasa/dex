@@ -8,21 +8,32 @@ import (
 	"github.com/bklimczak/dex/internal/db"
 	"github.com/bklimczak/dex/internal/ui/styles"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
+type CellEditMsg struct {
+	Table    string
+	Column   string
+	NewValue string
+	Row      map[string]string // all column values for WHERE clause
+}
+
 type Model struct {
-	result    *db.QueryResult
-	cursorRow int
-	cursorCol int
-	scrollX   int
-	scrollY   int
-	focused   bool
-	width     int
-	height    int
-	colWidths []int
-	err       string
+	result      *db.QueryResult
+	sourceTable string
+	cursorRow   int
+	cursorCol   int
+	scrollX     int
+	scrollY     int
+	focused     bool
+	editing     bool
+	editInput   textinput.Model
+	width       int
+	height      int
+	colWidths   []int
+	err         string
 }
 
 func New() Model {
@@ -42,12 +53,17 @@ func (m *Model) Focused() bool {
 	return m.focused
 }
 
+func (m *Model) SetSourceTable(table string) {
+	m.sourceTable = table
+}
+
 func (m *Model) SetResult(r *db.QueryResult) {
 	m.result = r
 	m.cursorRow = 0
 	m.cursorCol = 0
 	m.scrollX = 0
 	m.scrollY = 0
+	m.editing = false
 	m.err = ""
 	if r != nil && r.Error != "" {
 		m.err = r.Error
@@ -91,6 +107,10 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if m.editing {
+		return m.updateEditing(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if !m.focused || m.result == nil {
@@ -123,9 +143,64 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.cursorRow = max(0, len(m.result.Rows)-1)
 			m.ensureVisible()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			if m.sourceTable != "" && len(m.result.Rows) > 0 {
+				m.startEditing()
+				return m, m.editInput.Focus()
+			}
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) startEditing() {
+	ti := textinput.New()
+	ti.CharLimit = 1000
+	currentVal := m.result.Rows[m.cursorRow][m.cursorCol]
+	if currentVal == "NULL" {
+		ti.SetValue("")
+	} else {
+		ti.SetValue(currentVal)
+	}
+	ti.CursorEnd()
+	m.editInput = ti
+	m.editing = true
+}
+
+func (m Model) updateEditing(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			newVal := m.editInput.Value()
+			oldVal := m.result.Rows[m.cursorRow][m.cursorCol]
+			m.editing = false
+			if newVal == oldVal {
+				return m, nil
+			}
+			// Build row map for WHERE clause
+			row := make(map[string]string)
+			for i, col := range m.result.Columns {
+				row[col] = m.result.Rows[m.cursorRow][i]
+			}
+			// Update local data immediately
+			m.result.Rows[m.cursorRow][m.cursorCol] = newVal
+			editMsg := CellEditMsg{
+				Table:    m.sourceTable,
+				Column:   m.result.Columns[m.cursorCol],
+				NewValue: newVal,
+				Row:      row,
+			}
+			return m, func() tea.Msg { return editMsg }
+		case "esc":
+			m.editing = false
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.editInput, cmd = m.editInput.Update(msg)
+	return m, cmd
 }
 
 func (m *Model) ensureVisible() {
@@ -210,6 +285,12 @@ func (m Model) View() string {
 				style = styles.NullCell.Width(w + 2)
 			}
 			if r == m.cursorRow && i == m.cursorCol && m.focused {
+				if m.editing {
+					style = style.Background(lipgloss.Color("22")).Foreground(lipgloss.Color("230"))
+					editView := m.editInput.View()
+					rowParts = append(rowParts, style.Render(truncPad(editView, w)))
+					continue
+				}
 				style = style.Background(lipgloss.Color("237"))
 			} else if r == m.cursorRow && m.focused {
 				style = style.Background(lipgloss.Color("235"))
@@ -225,6 +306,9 @@ func (m Model) View() string {
 	// Status line
 	b.WriteString("\n")
 	status := fmt.Sprintf(" %d rows | row %d/%d ", m.result.RowCount, m.cursorRow+1, len(m.result.Rows))
+	if m.editing {
+		status += "| EDITING (enter: save, esc: cancel) "
+	}
 	b.WriteString(styles.StatusBar.Render(status))
 
 	return b.String()

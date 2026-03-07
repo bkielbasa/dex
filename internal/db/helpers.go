@@ -26,6 +26,8 @@ func scanRows(rows *sql.Rows) (*QueryResult, error) {
 		for i, v := range values {
 			if v == nil {
 				row[i] = "NULL"
+			} else if b, ok := v.([]byte); ok {
+				row[i] = string(b)
 			} else {
 				row[i] = fmt.Sprintf("%v", v)
 			}

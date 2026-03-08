@@ -448,6 +448,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setFocus(paneResults)
 		return m, nil
 
+	case results.SortMsg:
+		if m.results.SourceTable() != "" {
+			order := "ASC"
+			if msg.Desc {
+				order = "DESC"
+			}
+			query := fmt.Sprintf("SELECT * FROM %s ORDER BY %s %s LIMIT 100",
+				m.results.SourceTable(), msg.Column, order)
+			m.status = fmt.Sprintf("Sorting by %s %s...", msg.Column, order)
+			return m, m.executeQueryCmd(query)
+		}
+		return m, nil
+
 	case results.CellEditMsg:
 		return m, m.updateCellCmd(msg)
 

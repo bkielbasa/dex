@@ -26,6 +26,11 @@ type CellEditMsg struct {
 	Row      map[string]string // all column values for WHERE clause
 }
 
+type SortMsg struct {
+	Column string
+	Desc   bool
+}
+
 type Model struct {
 	result      *db.QueryResult
 	sourceTable string
@@ -40,6 +45,8 @@ type Model struct {
 	height      int
 	colWidths   []int
 	err         string
+	sortCol     int
+	sortDesc    bool
 }
 
 func New() Model {
@@ -61,6 +68,16 @@ func (m *Model) Focused() bool {
 
 func (m *Model) SetSourceTable(table string) {
 	m.sourceTable = table
+	m.sortCol = -1
+	m.sortDesc = false
+}
+
+func (m *Model) SourceTable() string {
+	return m.sourceTable
+}
+
+func (m *Model) Result() *db.QueryResult {
+	return m.result
 }
 
 func (m *Model) SetResult(r *db.QueryResult) {
@@ -149,6 +166,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.cursorRow = max(0, len(m.result.Rows)-1)
 			m.ensureVisible()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("s"))):
+			if m.sourceTable != "" && m.result != nil && len(m.result.Columns) > 0 {
+				if m.sortCol == m.cursorCol {
+					m.sortDesc = !m.sortDesc
+				} else {
+					m.sortCol = m.cursorCol
+					m.sortDesc = false
+				}
+				col := m.result.Columns[m.cursorCol]
+				desc := m.sortDesc
+				return m, func() tea.Msg {
+					return SortMsg{Column: col, Desc: desc}
+				}
+			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("i", "a"))):
 			if m.sourceTable != "" && len(m.result.Rows) > 0 {
 				m.startEditing()
@@ -271,7 +302,15 @@ func (m Model) View() string {
 	var headerParts []string
 	for i := startCol; i < endCol; i++ {
 		w := m.colWidths[i]
-		cell := truncPad(m.result.Columns[i], w)
+		colName := m.result.Columns[i]
+		if i == m.sortCol {
+			if m.sortDesc {
+				colName += " ▼"
+			} else {
+				colName += " ▲"
+			}
+		}
+		cell := truncPad(colName, w)
 		headerParts = append(headerParts, styles.HeaderCell.Width(w+2).Render(cell))
 	}
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, headerParts...))

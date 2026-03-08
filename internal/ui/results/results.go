@@ -31,6 +31,9 @@ type SortMsg struct {
 	Desc   bool
 }
 
+type PageNextMsg struct{}
+type PagePrevMsg struct{}
+
 type Model struct {
 	result      *db.QueryResult
 	sourceTable string
@@ -47,6 +50,9 @@ type Model struct {
 	err         string
 	sortCol     int
 	sortDesc    bool
+	page        int
+	totalRows   int
+	pageSize    int
 }
 
 func New() Model {
@@ -70,6 +76,9 @@ func (m *Model) SetSourceTable(table string) {
 	m.sourceTable = table
 	m.sortCol = -1
 	m.sortDesc = false
+	m.page = 0
+	m.totalRows = 0
+	m.pageSize = 0
 }
 
 func (m *Model) SourceTable() string {
@@ -78,6 +87,12 @@ func (m *Model) SourceTable() string {
 
 func (m *Model) Result() *db.QueryResult {
 	return m.result
+}
+
+func (m *Model) SetPagination(page, totalRows, pageSize int) {
+	m.page = page
+	m.totalRows = totalRows
+	m.pageSize = pageSize
 }
 
 func (m *Model) SetResult(r *db.QueryResult) {
@@ -166,6 +181,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.cursorRow = max(0, len(m.result.Rows)-1)
 			m.ensureVisible()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("n"))):
+			if m.sourceTable != "" && m.totalRows > 0 {
+				return m, func() tea.Msg { return PageNextMsg{} }
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
+			if m.sourceTable != "" && m.totalRows > 0 {
+				return m, func() tea.Msg { return PagePrevMsg{} }
+			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("s"))):
 			if m.sourceTable != "" && m.result != nil && len(m.result.Columns) > 0 {
 				if m.sortCol == m.cursorCol {
@@ -366,7 +389,17 @@ func (m Model) View() string {
 
 	// Status line
 	b.WriteString("\n")
-	status := fmt.Sprintf(" %d rows | row %d/%d ", m.result.RowCount, m.cursorRow+1, len(m.result.Rows))
+	var status string
+	if m.totalRows > 0 && m.pageSize > 0 {
+		startRow := (m.page-1)*m.pageSize + 1
+		endRow2 := startRow + len(m.result.Rows) - 1
+		totalPages := (m.totalRows + m.pageSize - 1) / m.pageSize
+		status = fmt.Sprintf(" page %d/%d | %d-%d of %d | row %d/%d ",
+			m.page, totalPages, startRow, endRow2, m.totalRows,
+			m.cursorRow+1, len(m.result.Rows))
+	} else {
+		status = fmt.Sprintf(" %d rows | row %d/%d ", m.result.RowCount, m.cursorRow+1, len(m.result.Rows))
+	}
 	if m.editing {
 		status += "| EDITING (enter: save, esc: cancel) "
 	}

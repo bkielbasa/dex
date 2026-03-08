@@ -81,6 +81,12 @@ type cellUpdateResultMsg struct {
 	err error
 }
 
+type tableCountMsg struct {
+	table string
+	count int
+	err   error
+}
+
 type Model struct {
 	sidebar  sidebar.Model
 	results  results.Model
@@ -109,6 +115,12 @@ type Model struct {
 	height         int
 	keys           keymap.KeyMap
 	status         string
+	pageOffset     int
+	pageSize       int
+	totalRows      int
+	currentTable   string
+	sortColumn     string
+	sortDescending bool
 	awaitingWinNav bool
 }
 
@@ -140,6 +152,7 @@ func New(cfg *config.Config, cfgPath string) Model {
 		historyPath:  histPath,
 		focus:        paneSidebar,
 		keys:         keymap.Default,
+		pageSize:     100,
 	}
 }
 
@@ -206,6 +219,31 @@ func (m Model) loadSchemaCmd(table string) tea.Cmd {
 		s, err := engine.Schema(table)
 		return schemaLoadedMsg{schema: s, err: err}
 	}
+}
+
+func (m Model) countTableCmd(table string) tea.Cmd {
+	return func() tea.Msg {
+		engine := m.registry.Active()
+		if engine == nil {
+			return tableCountMsg{err: fmt.Errorf("no active connection")}
+		}
+		var count int
+		err := engine.DB().QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", table)).Scan(&count)
+		return tableCountMsg{table: table, count: count, err: err}
+	}
+}
+
+func (m Model) loadPageCmd() tea.Cmd {
+	query := fmt.Sprintf("SELECT * FROM %s", m.currentTable)
+	if m.sortColumn != "" {
+		order := "ASC"
+		if m.sortDescending {
+			order = "DESC"
+		}
+		query += fmt.Sprintf(" ORDER BY %s %s", m.sortColumn, order)
+	}
+	query += fmt.Sprintf(" LIMIT %d OFFSET %d", m.pageSize, m.pageOffset)
+	return m.executeQueryCmd(query)
 }
 
 func (m Model) updateCellCmd(edit results.CellEditMsg) tea.Cmd {
@@ -489,24 +527,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.results.SetResult(msg.result)
+		if m.currentTable != "" {
+			page := (m.pageOffset / m.pageSize) + 1
+			m.results.SetPagination(page, m.totalRows, m.pageSize)
+		}
 		m.setFocus(paneResults)
 		return m, nil
 
-	case results.SortMsg:
-		if m.results.SourceTable() != "" {
-			order := "ASC"
-			if msg.Desc {
-				order = "DESC"
+	case results.PageNextMsg:
+		if m.currentTable != "" && m.pageOffset+m.pageSize < m.totalRows {
+			m.pageOffset += m.pageSize
+			m.status = "Loading next page..."
+			return m, m.loadPageCmd()
+		}
+		return m, nil
+
+	case results.PagePrevMsg:
+		if m.currentTable != "" && m.pageOffset > 0 {
+			m.pageOffset -= m.pageSize
+			if m.pageOffset < 0 {
+				m.pageOffset = 0
 			}
-			query := fmt.Sprintf("SELECT * FROM %s ORDER BY %s %s LIMIT 100",
-				m.results.SourceTable(), msg.Column, order)
-			m.status = fmt.Sprintf("Sorting by %s %s...", msg.Column, order)
-			return m, m.executeQueryCmd(query)
+			m.status = "Loading previous page..."
+			return m, m.loadPageCmd()
+		}
+		return m, nil
+
+	case results.SortMsg:
+		if m.currentTable != "" {
+			m.sortColumn = msg.Column
+			m.sortDescending = msg.Desc
+			m.pageOffset = 0
+			m.status = fmt.Sprintf("Sorting by %s...", msg.Column)
+			return m, m.loadPageCmd()
 		}
 		return m, nil
 
 	case results.CellEditMsg:
 		return m, m.updateCellCmd(msg)
+
+	case tableCountMsg:
+		if msg.err == nil {
+			m.totalRows = msg.count
+			// Update pagination display
+			if m.currentTable != "" {
+				page := (m.pageOffset / m.pageSize) + 1
+				m.results.SetPagination(page, m.totalRows, m.pageSize)
+			}
+		}
+		return m, nil
 
 	case cellUpdateResultMsg:
 		if msg.err != nil {
@@ -519,9 +588,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sidebar.TableSelectedMsg:
 		m.registry.SetActive(msg.Connection)
 		m.results.SetSourceTable(msg.Table)
-		query := fmt.Sprintf("SELECT * FROM %s LIMIT 100", msg.Table)
+		m.currentTable = msg.Table
+		m.pageOffset = 0
+		m.sortColumn = ""
+		m.sortDescending = false
+		m.totalRows = 0
 		m.status = fmt.Sprintf("Loading %s.%s...", msg.Connection, msg.Table)
-		return m, m.executeQueryCmd(query)
+		return m, tea.Batch(m.loadPageCmd(), m.countTableCmd(msg.Table))
 
 	case sidebar.ConnectionSelectedMsg:
 		m.registry.SetActive(msg.Connection)
@@ -531,7 +604,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case querybar.ExecuteQueryMsg:
 		m.status = "Executing query..."
 		m.lastQuery = msg.Query
-		m.results.SetSourceTable("") // arbitrary query, disable editing
+		m.results.SetSourceTable("") // arbitrary query, disable editing/pagination
+		m.currentTable = ""
 		m.queryHistory = append(m.queryHistory, msg.Query)
 		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)
@@ -580,7 +654,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modal = modalNone
 		m.status = "Executing query..."
 		m.lastQuery = msg.Query
-		m.results.SetSourceTable("") // arbitrary query, disable editing
+		m.results.SetSourceTable("") // arbitrary query, disable editing/pagination
+		m.currentTable = ""
 		m.queryHistory = append(m.queryHistory, msg.Query)
 		config.SaveHistory(m.historyPath, m.queryHistory)
 		return m, m.executeQueryCmd(msg.Query)

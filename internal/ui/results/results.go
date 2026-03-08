@@ -144,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.cursorRow = max(0, len(m.result.Rows)-1)
 			m.ensureVisible()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+		case key.Matches(msg, key.NewBinding(key.WithKeys("i", "a"))):
 			if m.sourceTable != "" && len(m.result.Rows) > 0 {
 				m.startEditing()
 				return m, m.editInput.Focus()

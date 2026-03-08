@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func scanRows(rows *sql.Rows) (*QueryResult, error) {
@@ -24,12 +25,25 @@ func scanRows(rows *sql.Rows) (*QueryResult, error) {
 		}
 		row := make([]string, len(cols))
 		for i, v := range values {
-			if v == nil {
+			switch val := v.(type) {
+			case nil:
 				row[i] = "NULL"
-			} else if b, ok := v.([]byte); ok {
-				row[i] = string(b)
-			} else {
-				row[i] = fmt.Sprintf("%v", v)
+			case []byte:
+				row[i] = string(val)
+			case time.Time:
+				if val.Hour() == 0 && val.Minute() == 0 && val.Second() == 0 && val.Nanosecond() == 0 {
+					row[i] = val.Format("2006-01-02")
+				} else {
+					row[i] = val.Format("2006-01-02 15:04:05")
+				}
+			case bool:
+				row[i] = fmt.Sprintf("%t", val)
+			case int64:
+				row[i] = fmt.Sprintf("%d", val)
+			case float64:
+				row[i] = fmt.Sprintf("%g", val)
+			default:
+				row[i] = fmt.Sprintf("%v", val)
 			}
 		}
 		result.Rows = append(result.Rows, row)

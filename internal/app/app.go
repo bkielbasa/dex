@@ -265,6 +265,8 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		return m.saveQuery(arg)
 	case "queries", "q!":
 		return m.openQueryPicker()
+	case "export":
+		return m.exportResults(arg)
 	default:
 		// Treat as SQL query
 		if input != "" {
@@ -310,6 +312,48 @@ func (m Model) openQueryPicker() (tea.Model, tea.Cmd) {
 	m.queryPicker.SetSize(m.width, m.height)
 	m.modal = modalQueryPicker
 	return m, m.queryPicker.Init()
+}
+
+func (m Model) exportResults(arg string) (tea.Model, tea.Cmd) {
+	result := m.results.Result()
+	if result == nil || len(result.Rows) == 0 {
+		m.status = "No results to export"
+		return m, nil
+	}
+
+	parts := strings.SplitN(arg, " ", 2)
+	format := strings.ToLower(parts[0])
+	if format != "csv" && format != "json" {
+		m.status = "Usage: :export csv [path] | :export json [path]"
+		return m, nil
+	}
+
+	path := ""
+	if len(parts) > 1 {
+		path = strings.TrimSpace(parts[1])
+	}
+	if path == "" {
+		table := m.results.SourceTable()
+		if table == "" {
+			table = "results"
+		}
+		path = fmt.Sprintf("./%s.%s", table, format)
+	}
+
+	var err error
+	switch format {
+	case "csv":
+		err = exportCSV(path, result)
+	case "json":
+		err = exportJSON(path, result)
+	}
+
+	if err != nil {
+		m.status = fmt.Sprintf("Export failed: %v", err)
+	} else {
+		m.status = fmt.Sprintf("Exported %d rows to %s", len(result.Rows), path)
+	}
+	return m, nil
 }
 
 func (m Model) reloadConfig() (tea.Model, tea.Cmd) {

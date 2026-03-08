@@ -53,6 +53,7 @@ type Model struct {
 	page        int
 	totalRows   int
 	pageSize    int
+	hiddenCols  map[int]bool
 }
 
 func New() Model {
@@ -102,6 +103,7 @@ func (m *Model) SetResult(r *db.QueryResult) {
 	m.scrollX = 0
 	m.scrollY = 0
 	m.editing = false
+	m.hiddenCols = make(map[int]bool)
 	m.err = ""
 	if r != nil && r.Error != "" {
 		m.err = r.Error
@@ -166,13 +168,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.ensureVisible()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("h", "left"))):
-			if m.cursorCol > 0 {
+			for m.cursorCol > 0 {
 				m.cursorCol--
+				if !m.hiddenCols[m.cursorCol] {
+					break
+				}
 			}
 			m.ensureVisibleX()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("l", "right"))):
-			if m.cursorCol < len(m.result.Columns)-1 {
+			for m.cursorCol < len(m.result.Columns)-1 {
 				m.cursorCol++
+				if !m.hiddenCols[m.cursorCol] {
+					break
+				}
 			}
 			m.ensureVisibleX()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("g"))):
@@ -203,6 +211,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return SortMsg{Column: col, Desc: desc}
 				}
 			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
+			if m.result != nil && len(m.result.Columns) > 1 {
+				m.hiddenCols[m.cursorCol] = true
+				// Move cursor off hidden column
+				for m.hiddenCols[m.cursorCol] && m.cursorCol < len(m.result.Columns)-1 {
+					m.cursorCol++
+				}
+				if m.hiddenCols[m.cursorCol] && m.cursorCol > 0 {
+					for m.cursorCol > 0 && m.hiddenCols[m.cursorCol] {
+						m.cursorCol--
+					}
+				}
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("C"))):
+			m.hiddenCols = make(map[int]bool)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("i", "a"))):
 			if m.sourceTable != "" && len(m.result.Rows) > 0 {
 				m.startEditing()
@@ -324,6 +347,9 @@ func (m Model) View() string {
 	// Header
 	var headerParts []string
 	for i := startCol; i < endCol; i++ {
+		if m.hiddenCols[i] {
+			continue
+		}
 		w := m.colWidths[i]
 		colName := m.result.Columns[i]
 		if i == m.sortCol {
@@ -340,11 +366,16 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	// Separator
+	firstSep := true
 	for i := startCol; i < endCol; i++ {
-		b.WriteString(strings.Repeat("─", m.colWidths[i]+2))
-		if i < endCol-1 {
+		if m.hiddenCols[i] {
+			continue
+		}
+		if !firstSep {
 			b.WriteString("┼")
 		}
+		b.WriteString(strings.Repeat("─", m.colWidths[i]+2))
+		firstSep = false
 	}
 	b.WriteString("\n")
 
@@ -358,6 +389,9 @@ func (m Model) View() string {
 	for r := m.scrollY; r < endRow; r++ {
 		var rowParts []string
 		for i := startCol; i < endCol; i++ {
+			if m.hiddenCols[i] {
+				continue
+			}
 			w := m.colWidths[i]
 			cell := ""
 			if i < len(m.result.Rows[r]) {
@@ -399,6 +433,9 @@ func (m Model) View() string {
 			m.cursorRow+1, len(m.result.Rows))
 	} else {
 		status = fmt.Sprintf(" %d rows | row %d/%d ", m.result.RowCount, m.cursorRow+1, len(m.result.Rows))
+	}
+	if len(m.hiddenCols) > 0 {
+		status += fmt.Sprintf("| %d hidden ", len(m.hiddenCols))
 	}
 	if m.editing {
 		status += "| EDITING (enter: save, esc: cancel) "

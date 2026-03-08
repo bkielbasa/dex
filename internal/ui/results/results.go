@@ -13,6 +13,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type OpenDetailMsg struct {
+	Columns []string
+	Values  []string
+}
+
 type CellEditMsg struct {
 	Table    string
 	Column   string
@@ -148,6 +153,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.sourceTable != "" && len(m.result.Rows) > 0 {
 				m.startEditing()
 				return m, m.editInput.Focus()
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			if len(m.result.Rows) > 0 {
+				row := m.result.Rows[m.cursorRow]
+				vals := make([]string, len(row))
+				copy(vals, row)
+				cols := make([]string, len(m.result.Columns))
+				copy(cols, m.result.Columns)
+				openMsg := OpenDetailMsg{Columns: cols, Values: vals}
+				return m, func() tea.Msg { return openMsg }
 			}
 		}
 	}

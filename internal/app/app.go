@@ -13,6 +13,7 @@ import (
 	"github.com/bklimczak/dex/internal/ui/connpicker"
 	"github.com/bklimczak/dex/internal/ui/editor"
 	"github.com/bklimczak/dex/internal/ui/querypicker"
+	"github.com/bklimczak/dex/internal/ui/rowdetail"
 	"github.com/bklimczak/dex/internal/ui/querybar"
 	"github.com/bklimczak/dex/internal/ui/results"
 	"github.com/bklimczak/dex/internal/ui/schema"
@@ -41,6 +42,7 @@ const (
 	modalCommand
 	modalConnPicker
 	modalQueryPicker
+	modalRowDetail
 )
 
 // Messages
@@ -94,6 +96,7 @@ type Model struct {
 	cmdBar       cmdbar.Model
 	connPicker   connpicker.Model
 	queryPicker  querypicker.Model
+	rowDetail    rowdetail.Model
 	savedQueries *config.SavedQueries
 	queriesPath  string
 	lastQuery    string
@@ -590,6 +593,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case results.OpenDetailMsg:
+		m.rowDetail = rowdetail.New(msg.Columns, msg.Values, m.width, m.height)
+		m.modal = modalRowDetail
+		return m, nil
+
+	case rowdetail.CloseMsg:
+		m.modal = modalNone
+		return m, nil
+
 	case tea.KeyMsg:
 		// Ctrl+W window navigation chord
 		if m.awaitingWinNav {
@@ -719,6 +731,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modalQueryPicker:
 		var cmd tea.Cmd
 		m.queryPicker, cmd = m.queryPicker.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	case modalRowDetail:
+		var cmd tea.Cmd
+		m.rowDetail, cmd = m.rowDetail.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -854,6 +873,9 @@ func (m Model) View() string {
 	case modalQueryPicker:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.queryPicker.View(), lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceForeground(lipgloss.Color("236")))
+	case modalRowDetail:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			m.rowDetail.View(), lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceForeground(lipgloss.Color("236")))
 	}
 
 	return base
